@@ -73,12 +73,12 @@ class IrisDataset(Dataset):
 
 # Activations
 def tanh(x, deriv=False):
-    '''
-	d/dx tanh(x) = 1 - tanh^2(x)
-	during backpropagation when we need to go though the derivative we have already computed tanh(x),
-	therefore we pass tanh(x) to the function which reduces the gradient to:
-	1 - tanh(x)
-    '''
+    """
+    d/dx tanh(x) = 1 - tanh^2(x)
+    during backpropagation when we need to go though the derivative we have already computed tanh(x),
+    therefore we pass tanh(x) to the function which reduces the gradient to:
+    1 - tanh(x)
+    """
     if deriv:
         return 1.0 - np.tanh(x)
     else:
@@ -91,11 +91,14 @@ def sigmoid(x, deriv=False):
     This function is the sigmoid function. It gets an input digit or vector and should return sigmoid(x).
     The parameter "deriv" toggles between the sigmoid and the derivate of the sigmoid. Hint: In the case of the derivate
     you can expect the input to be sigmoid(x) instead of x
-    :param x:
-    :param deriv:
-    :return:
+    :param x:       type: np.array
+    :param deriv:   type: Boolean
+    :return:        type: np.array
     '''
-    pass
+    if deriv:
+        return x * (1 - x)
+    else:
+        return 1 / (1 + np.exp(-x))
 
 
 def softmax(x, deriv=False):
@@ -103,11 +106,18 @@ def softmax(x, deriv=False):
     Task 2a
     This function is the sigmoid function with a softmax applied. This will be used in the last layer of the network
     The derivate will be the same as of sigmoid(x)
-    :param x:
-    :param deriv:
-    :return:
+    TODO: This means we need to apply sigmoid over x firstly, then apply softmax? I implement it without sigmoid
+    :param x:       type: np.array
+    :param deriv:   type: Boolean
+    :return:        type: np.array
     '''
-    pass
+    if deriv:
+        return x * (1 - x)
+    else:
+        sum = np.sum(x)
+        for i in x:
+            x[i] = x[i] / sum
+        return x
 
 
 class Layer:
@@ -120,9 +130,9 @@ class Layer:
         self.initializeWeights()
 
         self.activation = activation
-        self.last_input = None	# placeholder, can be used in backpropagation
-        self.last_output = None # placeholder, can be used in backpropagation
-	self.last_nodes = None  # placeholder, can be used in backpropagation
+        self.last_input = None  # placeholder, can be used in backpropagation  -- I use this to store the input of this layer: y_{l-1}
+        self.last_output = None  # placeholder, can be used in backpropagation -- output of inference function: y_{l}
+        self.last_nodes = None  # placeholder, can be used in backpropagation  -- the value of nodes: z_{l}
 
     def initializeWeights(self):
         """
@@ -142,7 +152,17 @@ class Layer:
         :return: output of the layer
         :rtype: np.array
         """
-        pass
+        self.last_input = x
+        self.last_nodes = np.matmul(self.weights.T, x) + self.biases
+        self.last_output = self.activation(self.last_nodes)
+        # for i in range(self.no):
+        #     for j in range(self.ni):
+        #         out = self.weights[j][i] * x[j]
+        #     self.last_nodes.append(out + self.biases[i])
+        #     self.last_output.append(self.activation(self.last_nodes[i]))
+        # self.last_nodes = np.array(self.last_nodes)
+        # self.last_output = np.array(self.last_output)
+        return self.last_output
 
     def backprop(self, error):
         """
@@ -156,15 +176,24 @@ class Layer:
         :return: gradients for the bias
         :rtype: np.array
         """
+        # here error is error signal (delta E_n / delta y_i ^ (l),
+        # it should be a 1D np.array with dimension of the number of nodes of layer l) for hidden layer,
+        # f = sigmoid,
+        gradients_weight = np.matmul(self.last_input.reshape(self.ni, 1), \
+                                     (error * sigmoid(self.last_nodes, True)).reshape(1, self.no))
+        gradients_bias = error * sigmoid(self.last_nodes, True)
+        error_signal = np.matmul((error * sigmoid(self.last_nodes, True)).reshape(1, self.no), self.weights)
+        return gradients_weight, gradients_bias, error_signal
 
-        return [], [], []
 
+# we apply softmax on the output layer, so the error of particular x_n is the log(output).
 
 class BasicNeuralNetwork():
     def __init__(self, layer_sizes=[5], num_input=4, num_output=3, num_epoch=50, learning_rate=0.1,
                  mini_batch_size=8):
-        self.layers = []
-        self.ls = layer_sizes
+        self.layers = []  # to store the Object layer.
+        self.ls = layer_sizes  # I consider this to be the size of different hidden layers [5,5,6,7,5,4],
+        # don't contain the input and output layer.
         self.ni = num_input
         self.no = num_output
         self.lr = learning_rate
@@ -181,7 +210,16 @@ class BasicNeuralNetwork():
         :return: output of the network
         :rtype: np.array
         """
-        return []
+        l = Layer(self.ni, self.ls[0])  # here l is the first hidden layer
+        l.inference(x)
+        self.layers.append(l)
+        for i in range(1, len(self.ls)):
+            l = Layer(self.ls[i - 1], self.ls[i])
+            l.inference(self.layers[i - 1].last_output)
+            self.layers.append(l)
+        l = Layer(self.ls[len(self.ls) - 1], self.no)  # here l is the output layer
+        output = softmax(l.inference(self.layers[len(self.ls) - 1].last_output))
+        return output
 
     def train(self, train_dataset, eval_dataset=None, monitor_ce_train=True, monitor_accuracy_train=True,
               monitor_ce_eval=True, monitor_accuracy_eval=True, monitor_plot='monitor.png'):
