@@ -2,23 +2,24 @@ import numpy as np
 import random
 import matplotlib.pyplot as plt
 import pickle
+from scipy.stats import truncnorm
 
 
 class Dataset:
     def __init__(self):
-        self.index = 0
+        self.index = 0          # TODO: what this index is for? For now I use it for iteration index during the training
 
-        self.obs = []
-        self.classes = []
-        self.num_obs = 0
-        self.num_classes = 0
-        self.indices = []
+        self.obs = []           # for irisData is like [array(5.0,3.5,1.3,0.3), array(5.0,3.5,1.3,0.3), ... , ]
+        self.classes = []       # for irisData is [array(1,0,0), array(0,1,0), array(0,0,1), ... , ]
+        self.num_obs = 0        # number of observations
+        self.num_classes = 0    # number of classes, for irisData is 3
+        self.indices = []       # [0, 1, 2, 3, 4, ... , num_obs]
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if self.index >= self.num_obs:
+        if self.index >= self.num_obs:      # index is greater than num_obs, then interrupt the iteration(read file iteration?)
             self.index = 0
             raise StopIteration
         else:
@@ -29,10 +30,22 @@ class Dataset:
         self.index = 0
 
     def get_obs_with_target(self, k):
-        index_list = [index for index, value in enumerate(self.classes) if value == k]
+        """
+        from self.classes read the index_list, which the class is a particular k like (1,0,0)
+        :param k:
+        :return: list containing all the observations [array(5.0,3.5,1.3,0.3), array(4.9,3.0,1.4,0.2), ...]
+                    with label k(1,0,0)
+        """
+        index_list = [index for index, value in enumerate(self.classes) if value == k] #
         return [self.obs[i] for i in index_list]
 
     def get_all_obs_class(self, shuffle=False):
+        """
+        shuffle indices, get all the pairs in that order.
+        :param shuffle:
+        :return: list containing all the observations with target [(array(5.0,3.5,1.3,0.3),array(1,0,0)),
+                                                                    (array(4.9,3.0,1.4,0.2),array(1,0,0)), ... ]
+        """
         if shuffle:
             random.shuffle(self.indices)
         return [(self.obs[i], self.classes[i]) for i in self.indices]
@@ -114,15 +127,18 @@ def softmax(x, deriv=False):
     if deriv:
         return x * (1 - x)
     else:
-        sum = np.sum(x)
-        for i in x:
-            x[i] = x[i] / sum
-        return x
+        exps = np.exp(x)
+        return exps / np.sum(exps)
+
+    # x = np.array(list(map(np.exp, x)))
+    # s = np.sum(x)
+    # for index, item in enumerate(x):
+    #     x[index] = item / s
 
 
 class Layer:
     def __init__(self, numInput, numOutput, activation=sigmoid):
-        print('Create layer with: {}x{} @ {}'.format(numInput, numOutput, activation))
+        # print('Create layer with: {}x{} @ {}'.format(numInput, numOutput, activation))
         self.ni = numInput
         self.no = numOutput
         self.weights = np.zeros(shape=[self.ni, self.no], dtype=np.float32)
@@ -132,7 +148,7 @@ class Layer:
         self.activation = activation
         self.last_input = None  # placeholder, can be used in backpropagation  -- I use this to store the input of this layer: y_{l-1}
         self.last_output = None  # placeholder, can be used in backpropagation -- output of inference function: y_{l}
-        self.last_nodes = None  # placeholder, can be used in backpropagation  -- the value of nodes: z_{l}
+        self.last_nodes = None  # placeholder, can be used in backpropagation  -- TODO: the value of nodes: z_{l}, but I don't use it
 
     def initializeWeights(self):
         """
@@ -141,7 +157,8 @@ class Layer:
         You can search the literature for possible initialization methods.
         :return: None
         """
-        pass
+        self.weights = np.random.randn(self.ni, self.no) * np.sqrt(2 / self.ni)
+
 
     def inference(self, x):
         """
@@ -153,15 +170,8 @@ class Layer:
         :rtype: np.array
         """
         self.last_input = x
-        self.last_nodes = np.matmul(self.weights.T, x) + self.biases
+        self.last_nodes = np.matmul(x.reshape(1, self.ni), self.weights) + self.biases
         self.last_output = self.activation(self.last_nodes)
-        # for i in range(self.no):
-        #     for j in range(self.ni):
-        #         out = self.weights[j][i] * x[j]
-        #     self.last_nodes.append(out + self.biases[i])
-        #     self.last_output.append(self.activation(self.last_nodes[i]))
-        # self.last_nodes = np.array(self.last_nodes)
-        # self.last_output = np.array(self.last_output)
         return self.last_output
 
     def backprop(self, error):
@@ -176,14 +186,21 @@ class Layer:
         :return: gradients for the bias
         :rtype: np.array
         """
-        # here error is error signal (delta E_n / delta y_i ^ (l),
-        # it should be a 1D np.array with dimension of the number of nodes of layer l) for hidden layer,
-        # f = sigmoid,
+        # print('-------------Begin: backprop-----------')
+        # print('Before backprop, weithes: \n', self.weights, '\n', 'biases: \n', self.biases)
         gradients_weight = np.matmul(self.last_input.reshape(self.ni, 1), \
-                                     (error * sigmoid(self.last_nodes, True)).reshape(1, self.no))
-        gradients_bias = error * sigmoid(self.last_nodes, True)
-        error_signal = np.matmul((error * sigmoid(self.last_nodes, True)).reshape(1, self.no), self.weights)
-        return gradients_weight, gradients_bias, error_signal
+                                     (error * sigmoid(self.last_output, True)).reshape(1, self.no))
+        gradients_bias = error * sigmoid(self.last_output, True)
+
+        # print("gradients_weight: ", gradients_weight, '\n', 'gradients_bias:', gradients_bias, '\n')
+
+        error_signal = np.matmul((error * sigmoid(self.last_output, True)).reshape(1, self.no), self.weights.T)
+        # print("error_signal: ", error_signal, "in layer:", self.ni, self.no)
+        self.weights = self.weights - 0.1 * gradients_weight
+        self.biases = self.biases - 0.1 * gradients_bias
+        # print('After backprop, weithes: \n', self.weights, '\n', 'biases: \n', self.biases)
+        # print('-------------End: have done backprop once-----------')
+        return self.weights, self.biases, error_signal
 
 
 # we apply softmax on the output layer, so the error of particular x_n is the log(output).
@@ -191,9 +208,11 @@ class Layer:
 class BasicNeuralNetwork():
     def __init__(self, layer_sizes=[5], num_input=4, num_output=3, num_epoch=50, learning_rate=0.1,
                  mini_batch_size=8):
-        self.layers = []  # to store the Object layer.
-        self.ls = layer_sizes  # I consider this to be the size of different hidden layers [5,5,6,7,5,4],
-        # don't contain the input and output layer.
+        self.layers = []       # to store the Object layer. [layers[0](form input to hidden layer 1),
+                                                            # layers[1], ... ,
+                                                            # layers[len(self.ls)]] (layers[3])
+        self.ls = layer_sizes  # I consider this to be the size of different hidden layers [5,5,4] (len(self.ls) = 3),
+        # don't contain the size of input and output layer.  The whole structure should be  4 + [5, 5, 4] + 3;
         self.ni = num_input
         self.no = num_output
         self.lr = learning_rate
@@ -210,15 +229,11 @@ class BasicNeuralNetwork():
         :return: output of the network
         :rtype: np.array
         """
-        l = Layer(self.ni, self.ls[0])  # here l is the first hidden layer
-        l.inference(x)
-        self.layers.append(l)
+        self.layers[0].inference(x)
         for i in range(1, len(self.ls)):
-            l = Layer(self.ls[i - 1], self.ls[i])
-            l.inference(self.layers[i - 1].last_output)
-            self.layers.append(l)
-        l = Layer(self.ls[len(self.ls) - 1], self.no)  # here l is the output layer
-        output = softmax(l.inference(self.layers[len(self.ls) - 1].last_output))
+            self.layers[i].inference(self.layers[i - 1].last_output)
+        output = softmax(self.layers[len(self.ls)].inference(self.layers[len(self.ls) - 1].last_output))
+        # print("------", output, "-------")
         return output
 
     def train(self, train_dataset, eval_dataset=None, monitor_ce_train=True, monitor_accuracy_train=True,
@@ -271,7 +286,16 @@ class BasicNeuralNetwork():
         :param dataset:
         :return: None
         """
-        pass
+        dataset.reset()
+        for index in range(dataset.num_obs):
+            output = self.forward(dataset.obs[index])
+            # error = np.sum(np.nan_to_num(-dataset.classes[index] * np.log(output) \
+            #                              - (1 - dataset.classes[index]) * np.log(1 - output)))
+            # error = - np.sum(np.log(output) * dataset.classes[index])  # TODO: local error, type: float32?
+            error_signal = - dataset.classes[index] * (1 - output)
+            print(error_signal)
+            for i in range(len(self.ls), -1, -1):
+                weights, bias, error_signal = self.layers[i].backprop(error_signal)
 
     def mini_batch_SGD(self, dataset):
         """
@@ -280,7 +304,19 @@ class BasicNeuralNetwork():
         :param dataset:
         :return: None
         """
-        pass
+        dataset.reset()
+        while dataset.index < dataset.num_obs:
+            error = 0
+            error_signal = 0
+            for j in range(self.mbs):
+                dataset.__next__()
+                output = self.forward(dataset.obs[dataset.index-1])
+                # error += - np.sum(np.log(output) * dataset.classes[dataset.index-1]) # TODO: mini_batch error, type: float32?
+                # error += np.sum(np.nan_to_num(-dataset.classes[dataset.index] * np.log(output) \
+                #                              - (1 - dataset.classes[dataset.index]) * np.log(1 - output)))
+                error_signal +=  - dataset.classes[dataset.index-1] * (1 - output)
+            for k in range(len(self.ls), -1, -1):
+                weights, bias, error_signal = self.layers[k].backprop(error_signal)
 
     def constructNetwork(self):
         """
@@ -288,13 +324,25 @@ class BasicNeuralNetwork():
         uses self.ls self.ni and self.no to construct a list of layers. The last layer should use sigmoid_softmax as an activation function. any preceeding layers should use sigmoid.
         :return: None
         """
-        pass
+        l = Layer(self.ni, self.ls[0], sigmoid)
+        l.initializeWeights()
+        self.layers.append(l)
+        for i in range(1, len(self.ls)):
+            l = Layer(self.ls[i - 1], self.ls[i], sigmoid)
+            l.initializeWeights()
+            self.layers.append(l)
+        l = Layer(self.ls[len(self.ls) - 1], self.no, softmax)
+        l.initializeWeights()
+        self.layers.append(l)
 
     def ce(self, dataset):
         ce = 0
         for x, t in dataset:
             t_hat = self.forward(x)
+            print("ce function forward output:",t_hat)
+            print("ce function:", t)
             ce += np.sum(np.nan_to_num(-t * np.log(t_hat) - (1 - t) * np.log(1 - t_hat)))
+
 
         return ce / dataset.num_obs
 
