@@ -99,7 +99,7 @@ def tanh(x, deriv=False):
 
 
 def sigmoid(x, deriv=False):
-    '''
+    """
     Task 2a
     This function is the sigmoid function. It gets an input digit or vector and should return sigmoid(x).
     The parameter "deriv" toggles between the sigmoid and the derivate of the sigmoid. Hint: In the case of the derivate
@@ -107,7 +107,7 @@ def sigmoid(x, deriv=False):
     :param x:       type: np.array
     :param deriv:   type: Boolean
     :return:        type: np.array
-    '''
+    """
     if deriv:
         return x * (1 - x)
     else:
@@ -115,25 +115,19 @@ def sigmoid(x, deriv=False):
 
 
 def softmax(x, deriv=False):
-    '''
+    """
     Task 2a
     This function is the sigmoid function with a softmax applied. This will be used in the last layer of the network
     The derivate will be the same as of sigmoid(x)
-    TODO: This means we need to apply sigmoid over x firstly, then apply softmax? I implement it without sigmoid
     :param x:       type: np.array
     :param deriv:   type: Boolean
     :return:        type: np.array
-    '''
+    """
     if deriv:
         return x * (1 - x)
     else:
         exps = np.exp(x)
         return exps / np.sum(exps)
-
-    # x = np.array(list(map(np.exp, x)))
-    # s = np.sum(x)
-    # for index, item in enumerate(x):
-    #     x[index] = item / s
 
 
 class Layer:
@@ -157,8 +151,9 @@ class Layer:
         You can search the literature for possible initialization methods.
         :return: None
         """
-        self.weights = np.random.randn(self.ni, self.no) * np.sqrt(2 / self.ni)
-
+        # self.weights = np.random.randn(self.ni, self.no) * np.sqrt(2 / self.ni)
+        self.weights = np.random.uniform(-0.1, 0.1, size=(self.ni, self.no))
+        self.biases = np.random.uniform(-0.1, 0.1, size=(self.no))
 
     def inference(self, x):
         """
@@ -191,16 +186,12 @@ class Layer:
         gradients_weight = np.matmul(self.last_input.reshape(self.ni, 1), \
                                      (error * sigmoid(self.last_output, True)).reshape(1, self.no))
         gradients_bias = error * sigmoid(self.last_output, True)
-
         # print("gradients_weight: ", gradients_weight, '\n', 'gradients_bias:', gradients_bias, '\n')
-
         error_signal = np.matmul((error * sigmoid(self.last_output, True)).reshape(1, self.no), self.weights.T)
         # print("error_signal: ", error_signal, "in layer:", self.ni, self.no)
-        self.weights = self.weights - 0.1 * gradients_weight
-        self.biases = self.biases - 0.1 * gradients_bias
         # print('After backprop, weithes: \n', self.weights, '\n', 'biases: \n', self.biases)
         # print('-------------End: have done backprop once-----------')
-        return self.weights, self.biases, error_signal
+        return gradients_weight, gradients_bias, error_signal
 
 
 # we apply softmax on the output layer, so the error of particular x_n is the log(output).
@@ -232,7 +223,7 @@ class BasicNeuralNetwork():
         self.layers[0].inference(x)
         for i in range(1, len(self.ls)):
             self.layers[i].inference(self.layers[i - 1].last_output)
-        output = softmax(self.layers[len(self.ls)].inference(self.layers[len(self.ls) - 1].last_output))
+        output = self.layers[len(self.ls)].inference(self.layers[len(self.ls) - 1].last_output)
         # print("------", output, "-------")
         return output
 
@@ -286,16 +277,17 @@ class BasicNeuralNetwork():
         :param dataset:
         :return: None
         """
-        dataset.reset()
-        for index in range(dataset.num_obs):
-            output = self.forward(dataset.obs[index])
-            # error = np.sum(np.nan_to_num(-dataset.classes[index] * np.log(output) \
-            #                              - (1 - dataset.classes[index]) * np.log(1 - output)))
-            # error = - np.sum(np.log(output) * dataset.classes[index])  # TODO: local error, type: float32?
-            error_signal = - dataset.classes[index] * (1 - output)
-            print(error_signal)
+        dataset = dataset.get_all_obs_class(True)
+        for item in dataset:
+            output = self.forward(item[0])
+            # error_signal = - item[1] * (1 - output)
+            # error_signal = 1 - output
+            error_signal = output - item[1]
             for i in range(len(self.ls), -1, -1):
-                weights, bias, error_signal = self.layers[i].backprop(error_signal)
+                gradients_weight, gradients_bias, error_signal = self.layers[i].backprop(error_signal)
+                self.layers[i].weights = self.layers[i].weights - self.lr * gradients_weight
+                self.layers[i].biases = self.layers[i].biases - self.lr * gradients_bias
+
 
     def mini_batch_SGD(self, dataset):
         """
@@ -305,18 +297,17 @@ class BasicNeuralNetwork():
         :return: None
         """
         dataset.reset()
-        while dataset.index < dataset.num_obs:
-            error = 0
+        mini_batches = dataset.get_mini_batches(self.mbs)
+        for item in mini_batches:
             error_signal = 0
-            for j in range(self.mbs):
-                dataset.__next__()
-                output = self.forward(dataset.obs[dataset.index-1])
-                # error += - np.sum(np.log(output) * dataset.classes[dataset.index-1]) # TODO: mini_batch error, type: float32?
-                # error += np.sum(np.nan_to_num(-dataset.classes[dataset.index] * np.log(output) \
-                #                              - (1 - dataset.classes[dataset.index]) * np.log(1 - output)))
-                error_signal +=  - dataset.classes[dataset.index-1] * (1 - output)
+            for i in range(self.mbs):
+                output = self.forward(item[0][i])
+                error_signal += output - item[1][i]
+            error_signal = error_signal / self.mbs
             for k in range(len(self.ls), -1, -1):
-                weights, bias, error_signal = self.layers[k].backprop(error_signal)
+                gradients_weight, gradients_bias, error_signal = self.layers[k].backprop(error_signal)
+                self.layers[k].weights = self.layers[k].weights - self.lr * gradients_weight
+                self.layers[k].biases = self.layers[k].biases - self.lr * gradients_bias
 
     def constructNetwork(self):
         """
@@ -339,11 +330,7 @@ class BasicNeuralNetwork():
         ce = 0
         for x, t in dataset:
             t_hat = self.forward(x)
-            print("ce function forward output:",t_hat)
-            print("ce function:", t)
             ce += np.sum(np.nan_to_num(-t * np.log(t_hat) - (1 - t) * np.log(1 - t_hat)))
-
-
         return ce / dataset.num_obs
 
     def accuracy(self, dataset):

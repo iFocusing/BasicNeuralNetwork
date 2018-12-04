@@ -8,6 +8,5 @@ print("\nLoading Iris test data ")
 testDataPath = "irisTestData.txt"
 testDataset = IrisDataset(testDataPath)
 
-net = BasicNeuralNetwork()
-net.mbs = 0
+net = BasicNeuralNetwork(mini_batch_size=8, layer_sizes=[100])
 net.train(trainDataset, testDataset)
