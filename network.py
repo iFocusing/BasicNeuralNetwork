@@ -2,13 +2,12 @@ import numpy as np
 import random
 import matplotlib.pyplot as plt
 import pickle
-from scipy.stats import truncnorm
+from numpy.linalg import cholesky
 
 
 class Dataset:
     def __init__(self):
-        self.index = 0          # TODO: what this index is for? For now I use it for iteration index during the training
-
+        self.index = 0          # TODO: what this index is for?
         self.obs = []           # for irisData is like [array(5.0,3.5,1.3,0.3), array(5.0,3.5,1.3,0.3), ... , ]
         self.classes = []       # for irisData is [array(1,0,0), array(0,1,0), array(0,0,1), ... , ]
         self.num_obs = 0        # number of observations
@@ -19,7 +18,7 @@ class Dataset:
         return self
 
     def __next__(self):
-        if self.index >= self.num_obs:      # index is greater than num_obs, then interrupt the iteration(read file iteration?)
+        if self.index >= self.num_obs:
             self.index = 0
             raise StopIteration
         else:
@@ -131,29 +130,38 @@ def softmax(x, deriv=False):
 
 
 class Layer:
-    def __init__(self, numInput, numOutput, activation=sigmoid):
+    def __init__(self, numInput, numOutput, activation=sigmoid, type='random'):
         # print('Create layer with: {}x{} @ {}'.format(numInput, numOutput, activation))
         self.ni = numInput
         self.no = numOutput
         self.weights = np.zeros(shape=[self.ni, self.no], dtype=np.float32)
         self.biases = np.zeros(shape=[self.no], dtype=np.float32)
-        self.initializeWeights()
+        self.initializeWeights(type)
 
         self.activation = activation
         self.last_input = None  # placeholder, can be used in backpropagation  -- I use this to store the input of this layer: y_{l-1}
         self.last_output = None  # placeholder, can be used in backpropagation -- output of inference function: y_{l}
-        self.last_nodes = None  # placeholder, can be used in backpropagation  -- TODO: the value of nodes: z_{l}, but I don't use it
+        self.last_nodes = None  # placeholder, can be used in backpropagation  -- TODO: to store the value of nodes: z_{l}, but it's never used
 
-    def initializeWeights(self):
+    def initializeWeights(self, type):
         """
         Task 2d
         Initialized the weight matrix of the layer. Weights should be initialized to something other than 0.
         You can search the literature for possible initialization methods.
         :return: None
         """
-        # self.weights = np.random.randn(self.ni, self.no) * np.sqrt(2 / self.ni)
-        self.weights = np.random.uniform(-0.1, 0.1, size=(self.ni, self.no))
-        self.biases = np.random.uniform(-0.1, 0.1, size=(self.no))
+        if type == 'random':
+            self.weights = np.random.randn(self.ni, self.no) * np.sqrt(2 / self.ni)
+            self.biases = np.random.randn(self.no) * np.sqrt(2 / self.no)
+        elif type == 'uniform':
+            self.weights = np.random.uniform(-0.1, 0.1, size=(self.ni, self.no))
+            self.biases = np.random.uniform(-0.1, 0.1, size=(self.no))
+        elif type == 'gaussian':
+            mean = 0
+            cov = 1/(self.no * self.ni)
+            print(mean, cov)
+            self.weights = cov * np.random.standard_normal(size=(self.ni, self.no)) + mean
+            self.biases = cov * np.random.standard_normal(self.no) + mean
 
     def inference(self, x):
         """
@@ -181,27 +189,19 @@ class Layer:
         :return: gradients for the bias
         :rtype: np.array
         """
-        # print('-------------Begin: backprop-----------')
-        # print('Before backprop, weithes: \n', self.weights, '\n', 'biases: \n', self.biases)
         gradients_weight = np.matmul(self.last_input.reshape(self.ni, 1), \
                                      (error * sigmoid(self.last_output, True)).reshape(1, self.no))
         gradients_bias = error * sigmoid(self.last_output, True)
-        # print("gradients_weight: ", gradients_weight, '\n', 'gradients_bias:', gradients_bias, '\n')
         error_signal = np.matmul((error * sigmoid(self.last_output, True)).reshape(1, self.no), self.weights.T)
-        # print("error_signal: ", error_signal, "in layer:", self.ni, self.no)
-        # print('After backprop, weithes: \n', self.weights, '\n', 'biases: \n', self.biases)
-        # print('-------------End: have done backprop once-----------')
         return gradients_weight, gradients_bias, error_signal
 
 
-# we apply softmax on the output layer, so the error of particular x_n is the log(output).
-
 class BasicNeuralNetwork():
     def __init__(self, layer_sizes=[5], num_input=4, num_output=3, num_epoch=50, learning_rate=0.1,
-                 mini_batch_size=8):
-        self.layers = []       # to store the Object layer. [layers[0](form input to hidden layer 1),
+                 mini_batch_size=8, type_of_initial_weights='random'):
+        self.layers = []       # to store the Objection layer. [layers[0](form input to hidden layer 1),
                                                             # layers[1], ... ,
-                                                            # layers[len(self.ls)]] (layers[3])
+                                                            # layers[len(self.ls)]]
         self.ls = layer_sizes  # I consider this to be the size of different hidden layers [5,5,4] (len(self.ls) = 3),
         # don't contain the size of input and output layer.  The whole structure should be  4 + [5, 5, 4] + 3;
         self.ni = num_input
@@ -209,6 +209,7 @@ class BasicNeuralNetwork():
         self.lr = learning_rate
         self.num_epoch = num_epoch
         self.mbs = mini_batch_size
+        self.type = type_of_initial_weights
 
         self.constructNetwork()
 
@@ -224,7 +225,6 @@ class BasicNeuralNetwork():
         for i in range(1, len(self.ls)):
             self.layers[i].inference(self.layers[i - 1].last_output)
         output = self.layers[len(self.ls)].inference(self.layers[len(self.ls) - 1].last_output)
-        # print("------", output, "-------")
         return output
 
     def train(self, train_dataset, eval_dataset=None, monitor_ce_train=True, monitor_accuracy_train=True,
@@ -280,8 +280,6 @@ class BasicNeuralNetwork():
         dataset = dataset.get_all_obs_class(True)
         for item in dataset:
             output = self.forward(item[0])
-            # error_signal = - item[1] * (1 - output)
-            # error_signal = 1 - output
             error_signal = output - item[1]
             for i in range(len(self.ls), -1, -1):
                 gradients_weight, gradients_bias, error_signal = self.layers[i].backprop(error_signal)
@@ -301,6 +299,10 @@ class BasicNeuralNetwork():
         for item in mini_batches:
             error_signal = 0
             for i in range(self.mbs):
+                try:
+                    dataset.__next__()
+                except StopIteration:
+                    break
                 output = self.forward(item[0][i])
                 error_signal += output - item[1][i]
             error_signal = error_signal / self.mbs
@@ -315,15 +317,12 @@ class BasicNeuralNetwork():
         uses self.ls self.ni and self.no to construct a list of layers. The last layer should use sigmoid_softmax as an activation function. any preceeding layers should use sigmoid.
         :return: None
         """
-        l = Layer(self.ni, self.ls[0], sigmoid)
-        l.initializeWeights()
+        l = Layer(self.ni, self.ls[0], sigmoid, self.type)
         self.layers.append(l)
         for i in range(1, len(self.ls)):
             l = Layer(self.ls[i - 1], self.ls[i], sigmoid)
-            l.initializeWeights()
             self.layers.append(l)
         l = Layer(self.ls[len(self.ls) - 1], self.no, softmax)
-        l.initializeWeights()
         self.layers.append(l)
 
     def ce(self, dataset):
